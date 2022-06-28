@@ -3,15 +3,12 @@ package main
 import (
 	"context"
 	"log"
+	"strconv"
 	"testing"
-	"time"
 
-	"github.com/brianvoe/gofakeit/v6"
-	_ "github.com/go-sql-driver/mysql"
 	"github.com/segmentio/ksuid"
 	"github.com/si3nloong/sqlike/sql/expr"
 	sqlstmt "github.com/si3nloong/sqlike/sql/stmt"
-	"github.com/si3nloong/sqlike/sqlike"
 	"github.com/si3nloong/sqlike/sqlike/actions"
 	"github.com/si3nloong/sqlike/sqlike/options"
 )
@@ -24,75 +21,104 @@ func (l Logger) Debug(stmt *sqlstmt.Statement) {
 	log.Printf("%+v", stmt)
 }
 
-const tableUser = "User"
-
-type User struct {
-	ID      ksuid.KSUID
-	Name    string
-	Email   string
-	Created time.Time
-}
-
-func newUser() *User {
-	usr := &User{}
-	usr.ID = ksuid.New()
-	usr.Name = gofakeit.Name() // Markus Moen
-	usr.Email = gofakeit.Email()
-	usr.Created = time.Now().UTC()
-	return usr
-}
-
 type Result struct {
 	Rows uint64 `sqlike:"rows"`
 }
 
-func setup() (*sqlike.Client, *sqlike.Database) {
+func BenchmarkJoinStatement(b *testing.B) {
 	ctx := context.Background()
-	client := sqlike.MustConnect(
-		ctx,
-		"mysql",
-		options.Connect().
-			ApplyURI(`root:abcd1234@tcp()/toxicquery?parseTime=true&loc=UTC&charset=utf8mb4&collation=utf8mb4_general_ci`),
-	)
-
-	client.SetPrimaryKey("ID")
-	// client.SetLogger(&Logger{})
-	db := client.Database("toxicquery")
-
-	table := db.Table(tableUser)
-	table.MustUnsafeMigrate(ctx, User{})
-
-	rows, err := db.QueryStmt(ctx, expr.Raw("EXPLAIN SELECT * FROM `User`"))
-	if err != nil {
-		panic(err)
+	_, db := setup()
+	emails := []string{
+		"aaliyahheathcote@douglas.org",
+		"heidischiller@casper.info",
+		"zorabeatty@wintheiser.name",
 	}
-
-	rows.Next()
-	var result Result
-	if err := rows.Decode(&result); err != nil {
-		panic(err)
+	query := `
+SELECT * FROM Car AS c LEFT JOIN User AS u
+ON c.UserID = u.ID
+WHERE u.Email IN (`
+	for i, email := range emails {
+		if i > 0 {
+			query += ","
+		}
+		query += strconv.Quote(email)
 	}
-	rows.Close()
+	query += ");"
 
-	if result.Rows >= 5000 {
-		return client, db
-	}
+	b.ResetTimer()
+	b.Run("SELECT with JOIN", func(b *testing.B) {
+		result, err := db.QueryStmt(ctx, expr.Raw(query))
+		if err != nil {
+			log.Println(err)
+			b.FailNow()
+		}
+		defer result.Close()
 
-	// set timezone for UTC
-	for i := 0; i < 10; i++ {
-		data := []*User{}
-		for j := 0; j < 200; j++ {
-			data = append(data, newUser())
+		userCars := []UserCar{}
+		for result.Next() {
+			var userCar UserCar
+			if err := result.Decode(&userCar); err != nil {
+				log.Println(err)
+				b.FailNow()
+			}
+
+			userCars = append(userCars, userCar)
+		}
+	})
+
+	b.Run("SELECT without JOIN", func(b *testing.B) {
+		result, err := db.Table(tableUser).Find(
+			ctx,
+			actions.Find().
+				Where(
+					expr.In("Email", emails),
+				),
+		)
+		if err != nil {
+			b.FailNow()
 		}
 
-		if _, err := table.Insert(ctx, &data); err != nil {
-			panic(err)
+		users := make(map[ksuid.KSUID]User)
+		userIDs := []ksuid.KSUID{}
+		for result.Next() {
+			var user User
+			if err := result.Decode(&user); err != nil {
+				b.FailNow()
+			}
+
+			userIDs = append(userIDs, user.ID)
+			users[user.ID] = user
 		}
 
-		time.Sleep(time.Second * 1)
-	}
+		result.Close()
 
-	return client, db
+		result, err = db.Table(tableCar).Find(
+			ctx,
+			actions.Find().
+				Where(
+					expr.In("UserID", userIDs),
+				),
+		)
+		if err != nil {
+			b.FailNow()
+		}
+
+		userCars := []UserCar{}
+		for result.Next() {
+			var car Car
+			if err := result.Decode(&car); err != nil {
+				b.FailNow()
+			}
+
+			userCars = append(userCars, UserCar{
+				User: users[car.UserID],
+				Car:  car,
+			})
+		}
+
+		result.Close()
+
+	})
 }
 
 func BenchmarkCountStatement(b *testing.B) {
@@ -101,7 +127,7 @@ func BenchmarkCountStatement(b *testing.B) {
 	table := db.Table(tableUser)
 	b.ResetTimer()
 
-	b.Run("Count with *", func(b *testing.B) {
+	b.Run("COUNT with *", func(b *testing.B) {
 		var count uint64
 		result, err := table.Find(ctx, actions.Find().
 			Select(expr.Count(expr.Raw("*"))))
@@ -116,7 +142,7 @@ func BenchmarkCountStatement(b *testing.B) {
 		}
 	})
 
-	b.Run("Count with Primary Key", func(b *testing.B) {
+	b.Run("COUNT with Primary Key", func(b *testing.B) {
 		var count uint64
 		result, err := table.Find(ctx, actions.Find().
 			Select(expr.Count("ID")))
@@ -131,7 +157,7 @@ func BenchmarkCountStatement(b *testing.B) {
 		}
 	})
 
-	b.Run("Count with Explain", func(b *testing.B) {
+	b.Run("COUNT with Explain", func(b *testing.B) {
 		rows, err := db.QueryStmt(ctx, expr.Raw("EXPLAIN SELECT `ID` FROM `User`;"))
 		if err != nil {
 			b.FailNow()
@@ -153,7 +179,7 @@ func BenchmarkLikeStatement(b *testing.B) {
 	table := db.Table(tableUser)
 	b.ResetTimer()
 
-	b.Run("Like with Leading Wildcard", func(b *testing.B) {
+	b.Run("LIKE with Leading Wildcard", func(b *testing.B) {
 		users := []*User{}
 		result, err := table.Find(ctx, actions.Find().
 			Where(
@@ -169,7 +195,7 @@ func BenchmarkLikeStatement(b *testing.B) {
 		}
 	})
 
-	b.Run("Like without Leading Wildcard", func(b *testing.B) {
+	b.Run("LIKE without Leading Wildcard", func(b *testing.B) {
 		users := []*User{}
 		result, err := table.Find(ctx, actions.Find().
 			Where(
@@ -266,7 +292,7 @@ func BenchmarkStoreProcedure(b *testing.B) {
 	client, db := setup()
 	b.ResetTimer()
 
-	b.Run("Insert with Stored Procedure", func(b *testing.B) {
+	b.Run("INSERT with Stored Procedure", func(b *testing.B) {
 		// DELIMITER $$
 		// CREATE PROCEDURE insertUser(IN id VARCHAR(255), IN name VARCHAR(255), IN email VARCHAR(255), IN created VARCHAR(255))
 		// BEGIN
@@ -284,12 +310,11 @@ func BenchmarkStoreProcedure(b *testing.B) {
 			user.Email,
 			user.Created,
 		); err != nil {
-			log.Println(err)
 			b.FailNow()
 		}
 	})
 
-	b.Run("Insert", func(b *testing.B) {
+	b.Run("INSERT", func(b *testing.B) {
 		b.StopTimer()
 		user := newUser()
 		b.StartTimer()
@@ -299,11 +324,4 @@ func BenchmarkStoreProcedure(b *testing.B) {
 			b.FailNow()
 		}
 	})
-}
-
-func main() {
-	// var cancel context.CancelFunc
-	// ctx, cancel = context.WithCancel(context.Background())
-	// defer cancel()
-
 }

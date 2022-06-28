@@ -1,5 +1,9 @@
 # Toxic Queries
 
+> This is an experiment to test how slow can a toxic query be.
+
+## Setup
+
 <p>Machine: Macbook Pro</p>
 <p>CPU: M1 Max</p>
 <p>Memory: 32GB</p>
@@ -8,11 +12,23 @@
 
 ## Benchmarks
 
-| Toxic Query             | Operation       |
-| ----------------------- | --------------- |
-| Count                   | 0.006944 ns/op  |
-| Count with Explain      | 0.0001292 ns/op |
-| With Leading %          | 0.001870 ns/op  |
-| Without Leading %       | 0.001372 ns/op  |
-| Offset Based Pagination | 0.04177 ns/op   |
-| Cursor Based Pagination | 0.01518 ns/op   |
+| Statement              | Operation       |
+| ---------------------- | --------------- |
+| COUNT with \*          | 0.009784 ns/op  |
+| COUNT with Primary Key | 0.01063 ns/op   |
+| COUNT with Explain     | 0.0001766 ns/op |
+
+| Statement              | Operation     |
+| ---------------------- | ------------- |
+| LIKE with Leading %    | 0.1275 ns/op  |
+| LIKE without Leading % | 0.09251 ns/op |
+
+| Statement               | Operation          |
+| ----------------------- | ------------------ |
+| Offset Based Pagination | 204339916750 ns/op |
+| Cursor Based Pagination | 1339252750 ns/op   |
+
+| Statement                    | Operation       |
+| ---------------------------- | --------------- |
+| INSERT with Stored Procedure | 0.0002593 ns/op |
+| INSERT                       | 0.0001896 ns/op |
