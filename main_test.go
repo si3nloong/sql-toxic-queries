@@ -62,7 +62,7 @@ func setup() (*sqlike.Client, *sqlike.Database) {
 	table := db.Table(tableUser)
 	table.MustUnsafeMigrate(ctx, User{})
 
-	rows, err := db.QueryStmt(ctx, expr.Raw(`EXPLAIN SELECT * FROM User`))
+	rows, err := db.QueryStmt(ctx, expr.Raw("EXPLAIN SELECT * FROM `User`"))
 	if err != nil {
 		panic(err)
 	}
@@ -100,7 +100,22 @@ func BenchmarkCountStatement(b *testing.B) {
 	_, db := setup()
 	table := db.Table(tableUser)
 
-	b.Run("Count", func(b *testing.B) {
+	b.Run("Count with *", func(b *testing.B) {
+		var count uint64
+		result, err := table.Find(ctx, actions.Find().
+			Select(expr.Count(expr.Raw("*"))))
+		if err != nil {
+			b.FailNow()
+		}
+		defer result.Close()
+
+		result.Next()
+		if err := result.Scan(&count); err != nil {
+			b.FailNow()
+		}
+	})
+
+	b.Run("Count with Primary Key", func(b *testing.B) {
 		var count uint64
 		result, err := table.Find(ctx, actions.Find().
 			Select(expr.Count("ID")))
@@ -113,8 +128,6 @@ func BenchmarkCountStatement(b *testing.B) {
 		if err := result.Scan(&count); err != nil {
 			b.FailNow()
 		}
-
-		log.Println(count)
 	})
 
 	b.Run("Count with Explain", func(b *testing.B) {
@@ -129,8 +142,6 @@ func BenchmarkCountStatement(b *testing.B) {
 		if err := rows.Decode(&result); err != nil {
 			b.FailNow()
 		}
-
-		log.Println(result.Rows)
 	})
 }
 
@@ -140,7 +151,7 @@ func BenchmarkLikeStatement(b *testing.B) {
 	_, db := setup()
 	table := db.Table(tableUser)
 
-	b.Run("With Leading Wildcard", func(b *testing.B) {
+	b.Run("Like with Leading Wildcard", func(b *testing.B) {
 		users := []*User{}
 		result, err := table.Find(ctx, actions.Find().
 			Where(
@@ -156,7 +167,7 @@ func BenchmarkLikeStatement(b *testing.B) {
 		}
 	})
 
-	b.Run("Without Leading Wildcard", func(b *testing.B) {
+	b.Run("Like without Leading Wildcard", func(b *testing.B) {
 		users := []*User{}
 		result, err := table.Find(ctx, actions.Find().
 			Where(
@@ -178,7 +189,7 @@ func BenchmarkPagination(b *testing.B) {
 	limit := uint(100)
 	_, db := setup()
 
-	b.Run("Offset Based", func(b *testing.B) {
+	b.Run("Offset Based Pagination", func(b *testing.B) {
 		offset := uint(0)
 
 		for {
@@ -210,7 +221,7 @@ func BenchmarkPagination(b *testing.B) {
 		}
 	})
 
-	b.Run("Cursor Based", func(b *testing.B) {
+	b.Run("Cursor Based Pagination", func(b *testing.B) {
 		var nextCursor string
 
 		for {
