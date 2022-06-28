@@ -99,6 +99,7 @@ func BenchmarkCountStatement(b *testing.B) {
 	ctx := context.Background()
 	_, db := setup()
 	table := db.Table(tableUser)
+	b.ResetTimer()
 
 	b.Run("Count with *", func(b *testing.B) {
 		var count uint64
@@ -150,6 +151,7 @@ func BenchmarkLikeStatement(b *testing.B) {
 	limit := uint(100)
 	_, db := setup()
 	table := db.Table(tableUser)
+	b.ResetTimer()
 
 	b.Run("Like with Leading Wildcard", func(b *testing.B) {
 		users := []*User{}
@@ -188,12 +190,14 @@ func BenchmarkPagination(b *testing.B) {
 	ctx := context.Background()
 	limit := uint(100)
 	_, db := setup()
+	table := db.Table(tableUser)
+	b.ResetTimer()
 
 	b.Run("Offset Based Pagination", func(b *testing.B) {
 		offset := uint(0)
 
 		for {
-			result, err := db.Table(tableUser).
+			result, err := table.
 				Find(ctx,
 					actions.Find().Offset(offset*limit).Limit(limit),
 					options.Find())
@@ -225,7 +229,7 @@ func BenchmarkPagination(b *testing.B) {
 		var nextCursor string
 
 		for {
-			result, err := db.Table(tableUser).
+			result, err := table.
 				Paginate(ctx, actions.Paginate().Limit(limit),
 					options.Paginate())
 			if err != nil {
@@ -257,13 +261,45 @@ func BenchmarkPagination(b *testing.B) {
 	})
 }
 
-// func BenchmarkStoreProcedure(b *testing.B) {
-// 	setup()
-// 	b.ResetTimer()
-// 	for i := 0; i < b.N; i++ {
+func BenchmarkStoreProcedure(b *testing.B) {
+	ctx := context.Background()
+	client, db := setup()
+	b.ResetTimer()
 
-// 	}
-// }
+	b.Run("Insert with Stored Procedure", func(b *testing.B) {
+		// DELIMITER $$
+		// CREATE PROCEDURE insertUser(IN id VARCHAR(255), IN name VARCHAR(255), IN email VARCHAR(255), IN created VARCHAR(255))
+		// BEGIN
+		// 	INSERT INTO User (ID, Name, Email, Created) VALUES (id, name, email, created);
+		// END $$
+		// DELIMITER ;
+
+		b.StopTimer()
+		user := newUser()
+		b.StartTimer()
+
+		if _, err := client.ExecContext(ctx, `call insertUser(?,?,?,?)`,
+			user.ID.String(),
+			user.Name,
+			user.Email,
+			user.Created,
+		); err != nil {
+			log.Println(err)
+			b.FailNow()
+		}
+	})
+
+	b.Run("Insert", func(b *testing.B) {
+		b.StopTimer()
+		user := newUser()
+		b.StartTimer()
+
+		if _, err := db.Table(tableUser).
+			InsertOne(ctx, user); err != nil {
+			b.FailNow()
+		}
+	})
+}
 
 func main() {
 	// var cancel context.CancelFunc
