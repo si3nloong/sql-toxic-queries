@@ -8,7 +8,7 @@
 <p>CPU: M1 Max</p>
 <p>Memory: 32GB</p>
 <p>OS: macOS Monterey</p>
-<p>Record set: 500000</p>
+<p>Record set: 500,000</p>
 
 ## Benchmarks
 
